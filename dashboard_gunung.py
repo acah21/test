@@ -8,57 +8,53 @@ st.set_page_config(page_title="Rekomendasi Gunung", layout="wide")
 st.title("Sistem Rekomendasi Gunung Pulau Jawa")
 
 # -------------------------------
-# Load dataset & model
+# Load dataset, model, scaler
 # -------------------------------
 data = pd.read_csv("dataset_gunung_final.csv")
 model = load_model("mlp_gunung_model.h5")
 scaler = joblib.load("scaler_gunung.save")
 
 # -------------------------------
-# Input user interaktif
+# Sidebar input user
 # -------------------------------
 st.sidebar.header("Filter Preferensi")
 
-# Contoh input: kategori dan fitur numerik
+# Pilih kategori
 kategori = st.sidebar.selectbox("Pilih kategori gunung:", data['kategori'].unique())
 
-# Untuk fitur numerik (misal 5 fitur)
-fitur_model = ['fitur1','fitur2','fitur3','fitur4','fitur5']
-input_data = {}
-for f in fitur_model:
-    min_val = float(data[f].min())
-    max_val = float(data[f].max())
-    val = st.sidebar.slider(f"{f}:", min_val, max_val, float((min_val+max_val)/2))
-    input_data[f] = val
-
-# -------------------------------
 # Filter dataset berdasarkan kategori
-# -------------------------------
 hasil_filter = data[data['kategori'] == kategori].copy()
 
-# -------------------------------
-# Buat dataframe untuk prediksi
-# -------------------------------
-X_user = hasil_filter[fitur_model].astype(np.float32)
+# Pilih fitur MLP (numerik + dummy kategori)
+fitur_num = ['elevation_m', 'hiking_duration_hours', 'distance_km', 'Elevation_gain']
+fitur_cat = [col for col in data.columns if col.startswith(('difficulty_level_', 'recommended_for_'))]
+fitur_model = fitur_num + fitur_cat
 
-# Terapkan scaler (yang sama dengan saat training)
-X_scaled = scaler.transform(X_user)
+# Pastikan semua numeric untuk MLP
+X = hasil_filter[fitur_model].astype(np.float32)
+
+# Terapkan scaler (sama seperti saat training)
+X_scaled = scaler.transform(X)
 
 # -------------------------------
 # Fungsi prediksi skor
 # -------------------------------
 def predict_score(X_input):
-    scores = model.predict(X_input).flatten()
-    return scores
+    return model.predict(X_input).flatten()
 
-# Tambahkan kolom skor
 hasil_filter['Skor'] = predict_score(X_scaled)
 
 # -------------------------------
 # Tampilkan hasil rekomendasi
 # -------------------------------
-st.subheader("Rekomendasi Gunung Berdasarkan Preferensi")
-st.write(hasil_filter.sort_values('Skor', ascending=False).reset_index(drop=True))
+st.subheader("Hasil Rekomendasi Gunung")
+st.dataframe(
+    hasil_filter.sort_values('Skor', ascending=False).reset_index(drop=True)
+)
 
-# Optional: tampilkan kolom penting saja
-# st.write(hasil_filter.sort_values('Skor', ascending=False)[['nama', 'lokasi', 'tinggi', 'Skor']])
+# -------------------------------
+# Optional: visualisasi top 5 gunung
+# -------------------------------
+top5 = hasil_filter.sort_values('Skor', ascending=False).head(5)
+st.subheader("Top 5 Gunung")
+st.bar_chart(data=top5.set_index('Name')['Skor'])
