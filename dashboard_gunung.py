@@ -1,71 +1,64 @@
-# dashboard_gunung.py
 import streamlit as st
 import pandas as pd
 import numpy as np
 from tensorflow.keras.models import load_model
+import joblib
 
-# ---------------------------
-# Load dataset dan model
-# ---------------------------
-df = pd.read_csv("dataset_gunung_final.csv")
+st.set_page_config(page_title="Rekomendasi Gunung", layout="wide")
+st.title("Sistem Rekomendasi Gunung Pulau Jawa")
 
-# Load model MLP tanpa compile (menghindari error mse)
-model = load_model("mlp_gunung_model.h5", compile=False)
+# -------------------------------
+# Load dataset & model
+# -------------------------------
+data = pd.read_csv("dataset_gunung_final.csv")
+model = load_model("mlp_gunung_model.h5")
+scaler = joblib.load("scaler_gunung.save")
 
-# ---------------------------
-# Sidebar: Input User
-# ---------------------------
-st.sidebar.header("Input Preferensi Pendakian")
+# -------------------------------
+# Input user interaktif
+# -------------------------------
+st.sidebar.header("Filter Preferensi")
 
-lokasi_user = st.sidebar.selectbox("Pilih Lokasi Anda:", options=df["Province"].unique())
-pengalaman = st.sidebar.selectbox("Tingkat Pengalaman:", ["Beginner", "Intermediate", "Advanced"])
-durasi_max = st.sidebar.slider("Durasi Pendakian Maksimal (jam):", min_value=1, max_value=12, value=6)
-tingkat_kesulitan = st.sidebar.multiselect(
-    "Tingkat Kesulitan:", options=df["difficulty_level"].unique(), default=df["difficulty_level"].unique()
-)
-jarak_max = st.sidebar.slider("Jarak Maksimal dari Lokasi (km):", min_value=1, max_value=50, value=10)
+# Contoh input: kategori dan fitur numerik
+kategori = st.sidebar.selectbox("Pilih kategori gunung:", data['kategori'].unique())
 
-submit = st.sidebar.button("Cari Rekomendasi")
+# Untuk fitur numerik (misal 5 fitur)
+fitur_model = ['fitur1','fitur2','fitur3','fitur4','fitur5']
+input_data = {}
+for f in fitur_model:
+    min_val = float(data[f].min())
+    max_val = float(data[f].max())
+    val = st.sidebar.slider(f"{f}:", min_val, max_val, float((min_val+max_val)/2))
+    input_data[f] = val
 
-# ---------------------------
-# Fungsi Filter & Ranking
-# ---------------------------
-def filter_gunung(df, lokasi, pengalaman, durasi, kesulitan, jarak):
-    filtered = df[
-        (df["Province"] == lokasi) &
-        (df["recommended_for"] == pengalaman) &
-        (df["hiking_duration_hours"] <= durasi) &
-        (df["difficulty_level"].isin(kesulitan)) &
-        (df["distance_km"] <= jarak)
-    ]
-    return filtered
+# -------------------------------
+# Filter dataset berdasarkan kategori
+# -------------------------------
+hasil_filter = data[data['kategori'] == kategori].copy()
 
-def predict_score(filtered_df):
-    if filtered_df.empty:
-        return filtered_df
-    X = filtered_df[["elevation_m", "hiking_duration_hours", "distance_km"]].values  # numpy array
-    scores = model.predict(X).flatten()
-    filtered_df = filtered_df.copy()
-    filtered_df["mlp_score"] = scores
-    filtered_df = filtered_df.sort_values(by="mlp_score", ascending=False)
-    return filtered_df
+# -------------------------------
+# Buat dataframe untuk prediksi
+# -------------------------------
+X_user = hasil_filter[fitur_model].astype(np.float32)
 
-# ---------------------------
-# Main
-# ---------------------------
-st.title("Sistem Rekomendasi Gunung Pendakian Pulau Jawa")
+# Terapkan scaler (yang sama dengan saat training)
+X_scaled = scaler.transform(X_user)
 
-if submit:
-    hasil_filter = filter_gunung(df, lokasi_user, pengalaman, durasi_max, tingkat_kesulitan, jarak_max)
-    hasil_rank = predict_score(hasil_filter)
+# -------------------------------
+# Fungsi prediksi skor
+# -------------------------------
+def predict_score(X_input):
+    scores = model.predict(X_input).flatten()
+    return scores
 
-    if hasil_rank.empty:
-        st.warning("Maaf, tidak ada gunung yang sesuai dengan preferensi Anda.")
-    else:
-        st.success(f"Ditemukan {len(hasil_rank)} gunung sesuai preferensi Anda!")
-        for _, row in hasil_rank.iterrows():
-            st.markdown(f"### {row['Name']} ({row['Province']})")
-            st.markdown(f"**Kesulitan:** {row['difficulty_level']} | **Durasi:** {row['hiking_duration_hours']} jam | **Jarak:** {row['distance_km']} km")
-            st.markdown(f"[Lihat di Maps]({row['source_url']})")
-            if pd.notna(row.get('image_url', None)):
-                st.image(row['image_url'], width=400)
+# Tambahkan kolom skor
+hasil_filter['Skor'] = predict_score(X_scaled)
+
+# -------------------------------
+# Tampilkan hasil rekomendasi
+# -------------------------------
+st.subheader("Rekomendasi Gunung Berdasarkan Preferensi")
+st.write(hasil_filter.sort_values('Skor', ascending=False).reset_index(drop=True))
+
+# Optional: tampilkan kolom penting saja
+# st.write(hasil_filter.sort_values('Skor', ascending=False)[['nama', 'lokasi', 'tinggi', 'Skor']])
